@@ -7,9 +7,10 @@ from typing import Dict, List, Optional
 
 
 class MidiArabia:
-    def __init__(self, path_midi: str):
+    def __init__(self, path_midi: str, detect_rhythms=True):
+        self.__detect_rhythms = detect_rhythms
         self.midi_obj = mid_parser.MidiFile(path_midi)
-        self.ticks_per_beat = round(self.midi_obj.ticks_per_beat / 10)
+        self.ticks_per_beat = round(self.midi_obj.ticks_per_beat)
         self.time_signature = self.midi_obj.time_signature_changes[0]
         self.numerator = self.time_signature.numerator
         self._denominator = self.time_signature.denominator
@@ -17,20 +18,21 @@ class MidiArabia:
         self.rest_note = None
 
         self.__rhythms = {
-            round(self.ticks_per_beat * 4): "w",
-            round(self.ticks_per_beat * 3): "hd",
-            round(self.ticks_per_beat * 4 / 3): "ht",
-            round(self.ticks_per_beat * 2): "h",
-            round(self.ticks_per_beat * 1.5): "qd",
-            round(self.ticks_per_beat * 2 / 3): "qt",
-            round(self.ticks_per_beat * 1 + self.ticks_per_beat * 0.25): "q^s",
-            self.ticks_per_beat: "q",
-            round(self.ticks_per_beat * 1 / 3): "et",
-            round(self.ticks_per_beat * 3 / 4): "ed",
-            round(self.ticks_per_beat / 2): "e",
-            round(self.ticks_per_beat / 4): "s",
-            round(self.ticks_per_beat / 6): "st",
+            "4.0": "w",
+            "3.0": "hd",
+            f"{round(4 / 3,2)}": "ht",
+            "2.0": "h",
+            f"{round(3 / 2,2)}": "qd",
+            f"{round(2 / 3,2)}": "qt",
+            f"{round(1 + (1/4) ,2)}": "q^s",
+            f"1.0": "q",
+            f"{round(1 / 3,2)}": "et",
+            f"{round(3 / 4,2)}": "ed",
+            f"{round(1 / 2,2)}": "e",
+            f"{round(1 / 4,2)}": "s",
+            f"{round(1 / 6,2)}": "st",
         }
+        self.__rhythms_floats = [float(item) for item in list(self.__rhythms.keys())]
         self.theme_start = "theme_start"
         self.phrase_start = "phrase_start"
 
@@ -55,12 +57,25 @@ class MidiArabia:
         for column in self.markers_set():
             self.midi_df[column] = self.__empty_series
 
+    def __filter_close_values(self, num, rel_tol=0.03, abs_tol=0.03):
+        return [
+            item
+            for item in self.__rhythms_floats
+            if math.isclose(item, num, rel_tol=rel_tol, abs_tol=abs_tol)
+        ]
+
     def __rhythms_define(self, duration: int) -> str:
-        # return duration
-        for i in range(-2, 3):
-            rhythm = self.__rhythms.get(duration + i)
-            if rhythm:
-                return rhythm
+        if self.__detect_rhythms:
+            for i in range(-2, 3):
+                temp = round(((duration + i) / self.ticks_per_beat), 2)
+                num = self.__filter_close_values(temp)
+                close_number = num[0] if (num) else temp
+                rhythm = self.__rhythms.get(f"{close_number}")
+                if rhythm:
+                    return rhythm
+                return temp
+        else:
+            return duration
 
     def markers_set(self) -> set:
         markers_set = set()
@@ -74,7 +89,7 @@ class MidiArabia:
         markers = {}
         for marker in self.midi_obj.markers:
             marker_titles = marker.text.split(",")
-            markers[round(marker.time / 10)] = marker_titles
+            markers[round(marker.time)] = marker_titles
         return markers
 
     def __get_quarter_note(self) -> Dict[int, int]:
@@ -87,7 +102,7 @@ class MidiArabia:
         pitch_bends = {}
 
         for pitch_bend in pitch_bends_filtered:
-            pitch_bends[round(pitch_bend.time / 10)] = pitch_bend.pitch
+            pitch_bends[round(pitch_bend.time)] = pitch_bend.pitch
 
         return pitch_bends
 
@@ -131,7 +146,6 @@ class MidiArabia:
                         else None
                     )
             else:
-                print("hello")
                 last_note_int = last_note or 0
                 current_note = note or 0
                 row["interval"] = (
@@ -155,8 +169,8 @@ class MidiArabia:
 
         for note in notes:
             pitch = note.pitch
-            start_time = round(note.start / 10)
-            end_time = round(note.end / 10)
+            start_time = round(note.start)
+            end_time = round(note.end)
             pitch_bend = quarter_tone_list.get(start_time)
             quarter_tone = pitch_bend / 341 * 0.5 if (pitch_bend) else 0
             rest_exist = start_time - last_note_end_time > 0
